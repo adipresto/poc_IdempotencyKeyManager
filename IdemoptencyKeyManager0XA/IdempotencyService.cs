@@ -21,17 +21,40 @@ namespace IdemoptencyKeyManager0XA
 
         public async Task<T> ExecuteAsync<T>(string idempotencyKey, Func<Task<T>> operation)
         {
+            bool lockAcquired = false;
+            short retryCount = 0;
+            short maxRetries = 3;
+
             if (string.IsNullOrEmpty(idempotencyKey))
                 throw new ArgumentException("Idempotency key cannot be null or empty", nameof(idempotencyKey));
 
             if (!ValidateKey(idempotencyKey))
                 throw new ArgumentException("Invalid idempotency key format", nameof(idempotencyKey));
 
-            // Coba ambil lock dulu
-            if (!await _storage.TryLockAsync(idempotencyKey, _lockTimeout))
+            // Coba ambil lock dulu, kalau gagal coba lagi (retry logic)
+            while (!lockAcquired && retryCount < maxRetries)
             {
-                // Tidak dapat lock → request lain sedang proses, ambil hasil saja
-                return await _storage.GetResultAsync<T>(idempotencyKey);
+                lockAcquired = await _storage.TryLockAsync(idempotencyKey, _lockTimeout);
+
+                if (!lockAcquired)
+                {
+                    retryCount++;
+
+                    // Tidak dapat lock → request lain sedang proses,
+                    // ambil hasil kalau request lain sudah selesai
+                    if (await _storage.ExistsAsync(idempotencyKey))
+                    {
+                        return await _storage.GetResultAsync<T>(idempotencyKey);
+                    }
+
+                    // Tiap percobaan dikali 100ms untuk mencoba lagi
+                    await Task.Delay(100 * retryCount); // 100ms, 200ms, 300ms
+                }
+            }
+
+            if (!lockAcquired)
+            {
+                throw new InvalidOperationException($"Unable to acquire lock after {maxRetries} retries");
             }
 
             try
