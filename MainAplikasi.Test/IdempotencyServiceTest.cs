@@ -24,7 +24,7 @@ namespace IdempotencyKeyService.Tests
             storageMock.Setup(s => s.TryLockAsync(key, It.IsAny<TimeSpan>()))
                 .ReturnsAsync(true);
 
-            var service = new IdempotencyService(storageMock.Object); // implementasi kamu sendiri
+            var service = new IdempotencyService(storageMock.Object);
 
             // Act
             var result = await service.ExecuteAsync(key, async () =>
